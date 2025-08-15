@@ -91,9 +91,9 @@
 
 		// Only allow files that are less than 1 hour in length
 		const tempMediaElement = document.createElement(fileType === 'audio' ? 'audio' : 'video');
-		tempMediaElement.src = fileUrl;
+		tempMediaElement.src = fileUrl!;
 
-		const duration = await new Promise((resolve, reject) => {
+		const duration = await new Promise<number>((resolve, reject) => {
 			tempMediaElement.onloadedmetadata = () => resolve(tempMediaElement.duration);
 			tempMediaElement.onerror = reject;
 		});
@@ -208,18 +208,11 @@
 		}
 	}
 
-	async function useSample() {
-		const sampleFile = await fetch('/gettysburg-address.mp3');
-		const blob = await sampleFile.blob();
-		selectedFile = new File([blob], 'sample.mp3', { type: 'audio/mp3' });
-		fileUrl = URL.createObjectURL(selectedFile);
-		fileType = 'audio';
-		handleSubmit();
-	}
+
 </script>
 
 <svelte:head>
-	<title>Gemini Transcribe</title>
+	<title>Paragon Transcribe</title>
 </svelte:head>
 
 <div class="flex min-h-screen flex-col bg-gradient-to-br from-indigo-50 via-white to-cyan-50">
@@ -232,15 +225,12 @@
 			<h1
 				class="mb-4 bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-3xl font-bold text-transparent md:text-4xl"
 			>
-				Gemini Transcribe
+				   PARAGON TRANSCRIPTION SERVICES
 			</h1>
-			<p class="mx-auto max-w-2xl text-xl leading-relaxed text-slate-700">
-				Transform your audio and video files into accurate transcripts with speaker diarization and
-				logically grouped timestamps.
-			</p>
+
 		</section>
 
-		<div class="mx-auto max-w-4xl">
+		<div class="mx-auto max-w-4xl mt-10">
 			{#if uploadComplete}
 				<!-- Media Player Section -->
 				<div
@@ -260,14 +250,16 @@
 								controls
 								class="w-full rounded-lg shadow-xl shadow-indigo-500/20"
 								bind:this={videoElement}
-							/>
+							>
+								<track kind="captions" label="English captions" src="" srclang="en" default />
+							</video>
 						{/if}
 					</div>
 
 					<!-- Download Actions -->
 					<div class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
 						<button
-							on:click={downloadTranscript}
+							on:click={() => downloadTranscript()}
 							class="group relative transform overflow-hidden rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/40"
 						>
 							<div class="relative flex items-center justify-center space-x-2">
@@ -463,24 +455,7 @@
 									>
 								</div>
 							</div>
-						{:else}
-							<div class="text-center">
-								<button
-									on:click={useSample}
-									class="inline-flex items-center space-x-2 text-indigo-600 transition-colors duration-200 hover:text-purple-600"
-								>
-									<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-										/>
-									</svg>
-									<span>Try with sample audio</span>
-								</button>
-							</div>
-						{/if}
+					{/if}
 					</div>
 				</div>
 			{/if}
@@ -532,15 +507,13 @@
 		<div class="container mx-auto px-4 py-4">
 			<div class="text-center text-slate-500">
 				<p class="text-sm">
-					by
 					<a
 						href="https://mikeesto.com"
 						class="font-medium text-indigo-600 transition-colors duration-200 hover:text-purple-600"
 					>
-						@mikeesto
+						www.paragontranscriptions.com
 					</a>
 				</p>
-				<p class="mt-1 text-sm">Suggestions/feedback? I'd love to hear from you</p>
 			</div>
 		</div>
 	</footer>
