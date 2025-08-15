@@ -2,20 +2,28 @@
 	import { onMount } from 'svelte';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Label } from '$lib/components/ui/label/index.js';
+	import JSZip from 'jszip';
 
-	let selectedFile: File | null = null;
+	let selectedFiles: File[] = [];
+	let fileUrls: string[] = [];
+	let fileTypes: ('audio' | 'video')[] = [];
 	let uploadComplete = false;
 	let isUploading = false;
-	let fileUrl: string | null = null;
-	let fileType: 'audio' | 'video';
-
 	let streamBuffer = '';
-	let transcriptArray: Array<{ timestamp: string; speaker: string; text: string }> = [];
-	let language = 'English';
+	let fileTranscripts: Array<{ fileName: string; entries: Array<{ timestamp: string; speaker: string; text: string }> }> = [];
+	let language = 'en';
+	const languageOptions = [
+		{ value: 'en', label: 'English' },
+		{ value: 'en-au', label: 'Australian English' },
+		{ value: 'ne-romanized', label: 'Nepali Romanized English' },
+		{ value: 'ne', label: 'Nepali' }
+	];
 	let initialized = false;
+	let showTimestamps = false;
+	let showSpeakers = false;
 
-	let audioElement: HTMLAudioElement | null = null;
-	let videoElement: HTMLVideoElement | null = null;
+	let audioElements: HTMLAudioElement[] = [];
+	let videoElements: HTMLVideoElement[] = [];
 
 	onMount(() => {
 		language = localStorage.getItem('transcriptionLanguage') || 'English';
@@ -36,24 +44,26 @@
 			timeInSeconds = parts[0] * 60 + parts[1]; // mm:ss
 		}
 
-		if (audioElement) {
+		audioElements.forEach(audioElement => {
 			audioElement.currentTime = timeInSeconds;
 			audioElement.play();
-		}
+		});
 
-		if (videoElement) {
+		videoElements.forEach(videoElement => {
 			videoElement.currentTime = timeInSeconds;
 			videoElement.play();
-		}
+		});
 	}
 
 	function handleFileInput(event: Event) {
 		const target = event.target as HTMLInputElement;
-		selectedFile = target.files?.[0] ?? null;
-		if (selectedFile) {
-			fileUrl = URL.createObjectURL(selectedFile);
-			fileType = selectedFile.type.includes('audio') ? 'audio' : 'video';
-		}
+		const newFiles = target.files ? Array.from(target.files) : [];
+		// Append new files, avoiding duplicates by name and size
+		const existingNames = new Set(selectedFiles.map(f => f.name + f.size));
+		const uniqueNewFiles = newFiles.filter(f => !existingNames.has(f.name + f.size));
+		selectedFiles = [...selectedFiles, ...uniqueNewFiles];
+		fileUrls = selectedFiles.map(file => URL.createObjectURL(file));
+		fileTypes = selectedFiles.map(file => file.type.includes('audio') ? 'audio' : 'video');
 	}
 
 	function parseStreamedJson(
@@ -87,74 +97,78 @@
 	}
 
 	async function handleSubmit() {
-		if (!selectedFile) return;
-
-		// Only allow files that are less than 1 hour in length
-		const tempMediaElement = document.createElement(fileType === 'audio' ? 'audio' : 'video');
-		tempMediaElement.src = fileUrl!;
-
-		const duration = await new Promise<number>((resolve, reject) => {
-			tempMediaElement.onloadedmetadata = () => resolve(tempMediaElement.duration);
-			tempMediaElement.onerror = reject;
-		});
-
-		if (duration >= 3600) {
-			alert('This file is too long. Please select a file that is less than 1 hour in length.');
-			return;
-		}
-
+		if (!selectedFiles.length) return;
+		fileTranscripts = [];
 		isUploading = true;
-
-		const formData = new FormData();
-		formData.append('file', selectedFile);
-		formData.append('language', language);
-
-		const response = await fetch('/api/upload', {
-			method: 'POST',
-			body: formData,
-			headers: {
-				Connection: 'keep-alive'
+		for (let i = 0; i < selectedFiles.length; i++) {
+			const file = selectedFiles[i];
+			const fileUrl = fileUrls[i];
+			const fileType = fileTypes[i];
+			// Only allow files that are less than 2 hours in length
+			const tempMediaElement = document.createElement(fileType === 'audio' ? 'audio' : 'video');
+			tempMediaElement.src = fileUrl;
+			const duration = await new Promise<number>((resolve, reject) => {
+				tempMediaElement.onloadedmetadata = () => resolve(tempMediaElement.duration);
+				tempMediaElement.onerror = reject;
+			});
+			if (duration >= 7200) {
+				alert(`File '${file.name}' is too long. Please select a file that is less than 2 hours in length.`);
+				continue;
 			}
-		});
-
-		const reader = response.body?.getReader();
-		if (!reader) {
-			throw new Error('Response body is missing');
-		}
-
-		const decoder = new TextDecoder();
-
-		try {
-			while (true) {
-				const { done, value } = await reader.read();
-
-				if (done) {
-					let parsedData;
-
-					try {
-						parsedData = JSON.parse(streamBuffer);
-					} catch (error) {
-						const response = await fetch('/api/fix-json', {
-							method: 'POST',
-							headers: { 'Content-Type': 'text/plain' },
-							body: streamBuffer
-						});
-						parsedData = (await response.json()).formattedJSON;
-					}
-
-					transcriptArray = [...parsedData];
-					streamBuffer = '';
-					uploadComplete = true;
-					isUploading = false;
-					break;
+			const formData = new FormData();
+			formData.append('file', file);
+			formData.append('language', language);
+			const response = await fetch('/api/upload', {
+				method: 'POST',
+				body: formData,
+				headers: {
+					Connection: 'keep-alive'
 				}
-
-				streamBuffer += decoder.decode(value, { stream: true });
-				transcriptArray = parseStreamedJson(streamBuffer);
+			});
+			const reader = response.body?.getReader();
+			if (!reader) {
+				throw new Error('Response body is missing');
 			}
-		} finally {
-			reader.cancel();
+			const decoder = new TextDecoder();
+			streamBuffer = '';
+			let fileTranscript: Array<{ timestamp: string; speaker: string; text: string }> = [];
+			// Add an empty transcript for this file so UI updates as lines are added
+			fileTranscripts = [...fileTranscripts, { fileName: file.name, entries: [] }];
+			let fileIndex = fileTranscripts.length - 1;
+			try {
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) {
+						let parsedData;
+						try {
+							parsedData = JSON.parse(streamBuffer);
+						} catch (error) {
+							const response = await fetch('/api/fix-json', {
+								method: 'POST',
+								headers: { 'Content-Type': 'text/plain' },
+								body: streamBuffer
+							});
+							parsedData = (await response.json()).formattedJSON;
+						}
+						fileTranscript = parsedData;
+						// Update the transcript for this file with the final data
+						fileTranscripts[fileIndex].entries = fileTranscript;
+						streamBuffer = '';
+						break;
+					}
+					streamBuffer += decoder.decode(value, { stream: true });
+					// Try to parse partial JSON array for progressive display
+					let partialTranscript = parseStreamedJson(streamBuffer);
+					if (partialTranscript && Array.isArray(partialTranscript)) {
+						fileTranscripts[fileIndex].entries = partialTranscript;
+					}
+				}
+			} finally {
+				reader.cancel();
+			}
 		}
+		uploadComplete = true;
+		isUploading = false;
 	}
 
 	async function downloadTranscript({ timestamps = true } = {}) {
@@ -163,7 +177,7 @@
 			headers: {
 				'Content-Type': 'application/json'
 			},
-			body: JSON.stringify({ transcript: transcriptArray, timestamps })
+			body: JSON.stringify({ transcript: fileTranscripts, timestamps })
 		});
 
 		const blob = await response.blob();
@@ -180,7 +194,7 @@
 			headers: {
 				'Content-Type': 'application/json'
 			},
-			body: JSON.stringify({ transcript: transcriptArray })
+			body: JSON.stringify({ transcript: fileTranscripts })
 		});
 
 		const blob = await response.blob();
@@ -191,21 +205,67 @@
 		a.click();
 	}
 
+	// Add a function to download a single transcript for a file
+	function downloadSingleTranscript(fileT) {
+		const lines = fileT.entries.map(entry => {
+			let line = '';
+			if (showTimestamps) line += `[${entry.timestamp}] `;
+			if (showSpeakers) line += `${entry.speaker}: `;
+			line += entry.text;
+			return line;
+		});
+		const blob = new Blob([lines.join('\n')], { type: 'application/msword' });
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(blob);
+		a.download = fileT.fileName.replace(/\.[^/.]+$/, '') + '-transcript.doc';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+	}
+
+	async function downloadAllTranscripts() {
+		const zip = new JSZip();
+		fileTranscripts.forEach(fileT => {
+			const lines = fileT.entries.map(entry => {
+				let line = '';
+				if (showTimestamps) line += `[${entry.timestamp}] `;
+				if (showSpeakers) line += `${entry.speaker}: `;
+				line += entry.text;
+				return line;
+			});
+			const docName = fileT.fileName.replace(/\.[^/.]+$/, '') + '-transcript.doc';
+			zip.file(docName, lines.join('\n'));
+		});
+		const content = await zip.generateAsync({ type: 'blob' });
+		const a = document.createElement('a');
+		a.href = URL.createObjectURL(content);
+		a.download = 'transcripts.zip';
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+	}
+
 	function reset() {
-		selectedFile = null;
+		selectedFiles = [];
 		uploadComplete = false;
 		isUploading = false;
-		fileUrl = null;
+		fileUrls = [];
 		streamBuffer = '';
-		transcriptArray = [];
-		if (audioElement) {
+		fileTranscripts = [];
+		audioElements.forEach(audioElement => {
 			audioElement.currentTime = 0;
 			audioElement.pause();
-		}
-		if (videoElement) {
+		});
+		videoElements.forEach(videoElement => {
 			videoElement.currentTime = 0;
 			videoElement.pause();
-		}
+		});
+	}
+
+	function removeFile(index: number) {
+		selectedFiles = selectedFiles.slice(0, index).concat(selectedFiles.slice(index + 1));
+		fileUrls = selectedFiles.map(file => URL.createObjectURL(file));
+		fileTypes = selectedFiles.map(file => file.type.includes('audio') ? 'audio' : 'video');
 	}
 
 
@@ -237,46 +297,31 @@
 					class="mb-8 rounded-xl border border-indigo-200 bg-white/80 p-8 shadow-xl shadow-indigo-500/10 backdrop-blur-sm"
 				>
 					<div class="mb-8">
-						{#if fileType === 'audio'}
-							<audio
-								src={fileUrl}
-								controls
-								class="h-12 w-full rounded-lg shadow-lg shadow-indigo-500/20"
-								bind:this={audioElement}
-							/>
-						{:else if fileType === 'video'}
-							<video
-								src={fileUrl}
-								controls
-								class="w-full rounded-lg shadow-xl shadow-indigo-500/20"
-								bind:this={videoElement}
-							>
-								<track kind="captions" label="English captions" src="" srclang="en" default />
-							</video>
-						{/if}
+						{#each fileUrls as fileUrl, index}
+							{#if fileTypes[index] === 'audio'}
+								<audio
+									src={fileUrl}
+									controls
+									class="h-12 w-full rounded-lg shadow-lg shadow-indigo-500/20"
+									bind:this={audioElements[index]}
+								/>
+							{:else if fileTypes[index] === 'video'}
+								<video
+									src={fileUrl}
+									controls
+									class="w-full rounded-lg shadow-xl shadow-indigo-500/20"
+									bind:this={videoElements[index]}
+								>
+									<track kind="captions" label="English captions" src="" srclang="en" default />
+								</video>
+							{/if}
+						{/each}
 					</div>
 
 					<!-- Download Actions -->
-					<div class="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+					<div class="mb-6 flex flex-col md:flex-row gap-4 md:gap-6 justify-center">
 						<button
-							on:click={() => downloadTranscript()}
-							class="group relative transform overflow-hidden rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/40"
-						>
-							<div class="relative flex items-center justify-center space-x-2">
-								<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-									/>
-								</svg>
-								<span>Download Transcript</span>
-							</div>
-						</button>
-
-						<button
-							on:click={() => downloadTranscript({ timestamps: false })}
+							on:click={downloadAllTranscripts}
 							class="group relative transform overflow-hidden rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4 font-semibold text-white shadow-lg shadow-emerald-500/25 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-emerald-500/40"
 						>
 							<div class="relative flex items-center justify-center space-x-2">
@@ -288,29 +333,9 @@
 										d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
 									/>
 								</svg>
-								<span>Download Transcript (no timestamps)</span>
+								<span>Download All</span>
 							</div>
 						</button>
-					</div>
-
-					<div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-						<button
-							on:click={downloadSRT}
-							class="group relative transform overflow-hidden rounded-lg bg-gradient-to-r from-orange-500 to-red-500 px-6 py-4 font-semibold text-white shadow-lg shadow-orange-500/25 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-orange-500/40"
-						>
-							<div class="relative flex items-center justify-center space-x-2">
-								<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path
-										stroke-linecap="round"
-										stroke-linejoin="round"
-										stroke-width="2"
-										d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-									/>
-								</svg>
-								<span>Download SRT</span>
-							</div>
-						</button>
-
 						<button
 							on:click={reset}
 							class="group relative transform overflow-hidden rounded-lg border-2 border-slate-300 bg-white/90 px-6 py-4 font-semibold text-slate-700 shadow-lg shadow-slate-500/10 backdrop-blur-sm transition-all duration-300 hover:-translate-y-1 hover:bg-slate-50 hover:shadow-xl hover:shadow-slate-500/20"
@@ -361,6 +386,27 @@
 					</div>
 
 					<div class="space-y-6">
+						{#if selectedFiles.length > 0}
+							<div class="mb-4">
+								<h3 class="text-slate-700 font-semibold mb-2">Selected Files:</h3>
+								<ul class="list-disc list-inside text-slate-600 text-sm">
+									{#each selectedFiles as file, i}
+										<li class="flex items-center gap-2">
+											{file.name}
+											<button
+												type="button"
+												class="ml-2 px-2 py-0.5 rounded bg-red-100 text-red-700 text-xs hover:bg-red-200"
+												on:click={() => removeFile(i)}
+												aria-label={`Remove ${file.name}`}
+											>
+												Remove
+											</button>
+										</li>
+									{/each}
+								</ul>
+							</div>
+						{/if}
+
 						<div>
 							<Label for="audio-file" class="mb-2 block text-sm font-medium text-slate-700">
 								Choose File
@@ -368,6 +414,7 @@
 							<div class="relative">
 								<Input
 									type="file"
+									multiple
 									on:input={handleFileInput}
 									id="audio-file"
 									accept="audio/*,video/*"
@@ -376,23 +423,48 @@
 							</div>
 						</div>
 
-						<div>
-							<Label for="language" class="mb-2 block text-sm font-medium text-slate-700">
-								Language of Transcript
-							</Label>
-							<Input
-								type="text"
-								bind:value={language}
+						<div class="mb-4">
+							<label for="language" class="block text-sm font-medium text-gray-700 mb-1">Language of Transcript</label>
+							<select
 								id="language"
-								placeholder="Enter language (e.g., English, Spanish)"
-								class="w-full rounded-lg border-2 border-indigo-200 bg-white/90 px-4 py-3 text-slate-800 placeholder-slate-400 shadow-sm backdrop-blur-sm transition-all duration-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
-							/>
+								class="block w-full rounded-md border border-gray-300 bg-white py-2 px-3 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+								bind:value={language}
+							>
+								{#each languageOptions as option}
+									<option value={option.value}>{option.label}</option>
+								{/each}
+							</select>
+						</div>
+
+						<div class="mt-2 mb-4 flex items-center gap-6">
+							<div class="flex items-center gap-2">
+								<input
+									type="checkbox"
+									id="show-timestamps"
+									bind:checked={showTimestamps}
+									class="accent-indigo-600 h-4 w-4"
+								/>
+								<label for="show-timestamps" class="text-slate-700 text-sm select-none cursor-pointer">
+									Show Timestamps
+								</label>
+							</div>
+							<div class="flex items-center gap-2">
+								<input
+									type="checkbox"
+									id="show-speakers"
+									bind:checked={showSpeakers}
+									class="accent-indigo-600 h-4 w-4"
+								/>
+								<label for="show-speakers" class="text-slate-700 text-sm select-none cursor-pointer">
+									Show Speakers
+								</label>
+							</div>
 						</div>
 
 						<button
 							on:click={handleSubmit}
 							class="group relative w-full transform overflow-hidden rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/40 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:transform-none"
-							disabled={!selectedFile || isUploading}
+							disabled={!selectedFiles.length || isUploading}
 						>
 							<div class="relative flex items-center justify-center space-x-2">
 								{#if isUploading}
@@ -409,7 +481,6 @@
 											d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
 										/>
 									</svg>
-									<span>Processing...</span>
 								{:else}
 									<svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path
@@ -419,8 +490,8 @@
 											d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
 										/>
 									</svg>
-									<span>Upload & Transcribe</span>
 								{/if}
+								<span>Upload & Transcribe</span>
 							</div>
 						</button>
 
@@ -450,18 +521,18 @@
 											d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
 										/>
 									</svg>
-									<span class="font-medium"
-										>Processing your file... This may take a few minutes</span
-									>
+									<span class="font-medium">
+										Processing your file... This may take a few minutes
+									</span>
 								</div>
 							</div>
-					{/if}
+						{/if}
 					</div>
 				</div>
 			{/if}
 
 			<!-- Transcript Display -->
-			{#if transcriptArray.length > 0}
+			{#if fileTranscripts.length > 0}
 				<div class="space-y-4">
 					<div class="mb-8 text-center">
 						<h3
@@ -472,29 +543,40 @@
 						<p class="text-slate-600">Click on timestamps to jump to that moment</p>
 					</div>
 
-					{#each transcriptArray as entry, index}
-						<div
-							class="group rounded-xl border border-slate-200 bg-white/90 p-6 shadow-lg shadow-slate-500/10 backdrop-blur-sm transition-all duration-300 hover:scale-[1.01] hover:shadow-xl hover:shadow-slate-500/20"
-						>
-							<div
-								class="flex flex-col space-y-3 sm:flex-row sm:items-start sm:space-x-4 sm:space-y-0"
-							>
+					{#each fileTranscripts as fileT}
+						<div class="mb-8">
+							<div class="flex items-center justify-between mb-2">
+								<h3 class="text-xl font-bold text-indigo-700">{fileT.fileName}</h3>
 								<button
-									class="inline-flex flex-shrink-0 transform items-center justify-center rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition-all duration-200 hover:scale-105 hover:shadow-xl hover:shadow-indigo-500/40"
-									on:click={() => handleTimestampClick(entry.timestamp)}
+									class="inline-flex items-center rounded bg-indigo-600 px-3 py-1 text-sm font-semibold text-white shadow hover:bg-indigo-700"
+									on:click={() => downloadSingleTranscript(fileT)}
 								>
-									{entry.timestamp}
+									Download Transcript
 								</button>
-								<div class="min-w-0 flex-1">
-									<div class="mb-3 flex items-center space-x-2">
-										<span
-											class="inline-flex items-center rounded-full border-2 border-emerald-200 bg-gradient-to-r from-emerald-100 to-teal-100 px-3 py-1 text-sm font-semibold text-emerald-700 shadow-sm"
-										>
-											{entry.speaker}
-										</span>
+							</div>
+							<div class="space-y-4">
+								{#each fileT.entries as entry, index}
+									<div class="group rounded-xl border border-slate-200 bg-white/90 p-6 shadow-lg shadow-slate-500/10 backdrop-blur-sm transition-all duration-300 hover:scale-[1.01] hover:shadow-xl hover:shadow-slate-500/20">
+										<div class="flex flex-col space-y-3 sm:flex-row sm:items-start sm:space-x-4 sm:space-y-0">
+											{#if showTimestamps}
+												<button
+													class="inline-flex flex-shrink-0 transform items-center justify-center rounded-full bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-indigo-500/25 transition-all duration-200 hover:scale-105 hover:shadow-xl hover:shadow-indigo-500/40"
+													on:click={() => handleTimestampClick(entry.timestamp)}
+												>
+													{entry.timestamp}
+												</button>
+											{/if}
+											<div class="min-w-0 flex-1">
+												{#if showSpeakers}
+													<span class="inline-flex items-center rounded-full border-2 border-emerald-200 bg-gradient-to-r from-emerald-100 to-teal-100 px-3 py-1 text-sm font-semibold text-emerald-700 shadow-sm">
+														{entry.speaker}
+													</span>
+												{/if}
+												<p class="font-medium leading-relaxed text-slate-800">{entry.text}</p>
+											</div>
+										</div>
 									</div>
-									<p class="font-medium leading-relaxed text-slate-800">{entry.text}</p>
-								</div>
+								{/each}
 							</div>
 						</div>
 					{/each}

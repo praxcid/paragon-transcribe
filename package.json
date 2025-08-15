@@ -38,6 +38,7 @@
 		"bits-ui": "^0.21.13",
 		"clsx": "^2.1.1",
 		"jsonrepair": "^3.9.0",
+		"jszip": "^3.10.1",
 		"tailwind-merge": "^2.5.2",
 		"tailwind-variants": "^0.2.1",
 		"tmp-promise": "^3.0.3"
