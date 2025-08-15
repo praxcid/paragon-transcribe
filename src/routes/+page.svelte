@@ -21,9 +21,20 @@
 	let initialized = false;
 	let showTimestamps = false;
 	let showSpeakers = false;
+	// Add a variable for the Medical checkbox
+	let isMedical = false;
 
 	let audioElements: HTMLAudioElement[] = [];
 	let videoElements: HTMLVideoElement[] = [];
+
+	// Add Gemini model selection
+	let geminiModel = 'gemini-2.5-flash';
+	const geminiModelOptions = [
+		{ value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+		{ value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+		{ value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+		{ value: 'gemini-1.0-pro', label: 'Gemini 1.0 Pro' }
+	];
 
 	onMount(() => {
 		language = localStorage.getItem('transcriptionLanguage') || 'English';
@@ -118,6 +129,10 @@
 			const formData = new FormData();
 			formData.append('file', file);
 			formData.append('language', language);
+			// In handleSubmit, add isMedical to the FormData
+			formData.append('isMedical', isMedical ? 'true' : 'false');
+			// In handleSubmit, add geminiModel to the FormData
+			formData.append('geminiModel', geminiModel);
 			const response = await fetch('/api/upload', {
 				method: 'POST',
 				body: formData,
@@ -217,7 +232,7 @@
 		const blob = new Blob([lines.join('\n')], { type: 'application/msword' });
 		const a = document.createElement('a');
 		a.href = URL.createObjectURL(blob);
-		a.download = fileT.fileName.replace(/\.[^/.]+$/, '') + '-transcript.doc';
+		a.download = fileT.fileName.replace(/\.[^/.]+$/, '') + `-transcript-${geminiModel}.doc`;
 		document.body.appendChild(a);
 		a.click();
 		document.body.removeChild(a);
@@ -233,7 +248,7 @@
 				line += entry.text;
 				return line;
 			});
-			const docName = fileT.fileName.replace(/\.[^/.]+$/, '') + '-transcript.doc';
+			const docName = fileT.fileName.replace(/\.[^/.]+$/, '') + `-transcript-${geminiModel}.doc`;
 			zip.file(docName, lines.join('\n'));
 		});
 		const content = await zip.generateAsync({ type: 'blob' });
@@ -436,6 +451,20 @@
 							</select>
 						</div>
 
+						<!-- Add Gemini model selection -->
+						<div class="mb-4">
+							<label for="gemini-model" class="block text-sm font-medium text-gray-700 mb-1">Gemini AI Model</label>
+							<select
+								id="gemini-model"
+								class="block w-full rounded-md border border-gray-300 bg-white py-2 px-3 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+								bind:value={geminiModel}
+							>
+								{#each geminiModelOptions as option}
+									<option value={option.value}>{option.label}</option>
+								{/each}
+							</select>
+						</div>
+
 						<div class="mt-2 mb-4 flex items-center gap-6">
 							<div class="flex items-center gap-2">
 								<input
@@ -456,7 +485,19 @@
 									class="accent-indigo-600 h-4 w-4"
 								/>
 								<label for="show-speakers" class="text-slate-700 text-sm select-none cursor-pointer">
-									Show Speakers
+									Separate Speakers
+								</label>
+							</div>
+							<!-- Add the Medical checkbox -->
+							<div class="flex items-center gap-2">
+								<input
+									type="checkbox"
+									id="medical"
+									bind:checked={isMedical}
+									class="accent-indigo-600 h-4 w-4"
+								/>
+								<label for="medical" class="text-slate-700 text-sm select-none cursor-pointer">
+									Medical
 								</label>
 							</div>
 						</div>
