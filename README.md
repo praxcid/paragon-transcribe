@@ -2,7 +2,7 @@
 
 A web application for transcribing audio and video files using Google's Gemini Flash model.
 
-**Live Application:** [https://gemini-transcribe.fly.dev/](https://gemini-transcribe.fly.dev/)
+**Live Application:** [https://paragon-transcribe.fly.dev/](https://paragon-transcribe.fly.dev/)
 
 ## Features
 
@@ -22,8 +22,8 @@ A web application for transcribing audio and video files using Google's Gemini F
 2.  Clone & install
 
     ```bash
-    git clone https://github.com/mikeesto/gemini-transcribe.git
-    cd gemini-transcribe
+    git clone https://github.com/mikeesto/paragon-transcribe.git
+    cd paragon-transcribe
     ```
 
     Install dependencies (using npm, pnpm, or yarn)

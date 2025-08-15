@@ -508,7 +508,7 @@
 			<div class="text-center text-slate-500">
 				<p class="text-sm">
 					<a
-						href="https://mikeesto.com"
+						href="https://paragontranscriptions.com"
 						class="font-medium text-indigo-600 transition-colors duration-200 hover:text-purple-600"
 					>
 						www.paragontranscriptions.com
