@@ -529,20 +529,24 @@
 
 						<!-- Add file inputs for glossary and style reference if Medical is checked -->
 						{#if isMedical}
-							<div class="flex flex-col gap-2 mt-2">
-								<label class="block text-sm font-medium text-gray-700">Upload Glossary (.doc or .txt):
-									<input type="file" accept=".doc,.txt" on:change={handleGlossaryFileInput} class="block mt-1" />
-									{#if glossaryFile}
-										<span class="text-xs text-slate-600">Selected: {glossaryFile.name}</span>
-									{/if}
-								</label>
-								<label class="block text-sm font-medium text-gray-700">Upload Style Reference (.doc):
-									<input type="file" accept=".doc" on:change={handleStyleFileInput} class="block mt-1" />
-									{#if styleFile}
-										<span class="text-xs text-slate-600">Selected: {styleFile.name}</span>
-									{/if}
-								</label>
+						 <div class="flex flex-col gap-2 mt-2">
+							<div class="flex items-center gap-2 mb-1">
+							  <span class="px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 text-xs font-semibold">Experimental</span>
+							  <span class="text-xs text-slate-600">Glossary and Style Reference features are experimental and may not always work as expected.</span>
 							</div>
+							<label class="block text-sm font-medium text-gray-700">Upload Glossary (.doc or .txt):
+							  <input type="file" accept=".doc,.txt" on:change={handleGlossaryFileInput} class="block mt-1" />
+							  {#if glossaryFile}
+								<span class="text-xs text-slate-600">Selected: {glossaryFile.name}</span>
+							  {/if}
+							</label>
+							<label class="block text-sm font-medium text-gray-700">Upload Style Reference (.doc):
+							  <input type="file" accept=".doc" on:change={handleStyleFileInput} class="block mt-1" />
+							  {#if styleFile}
+								<span class="text-xs text-slate-600">Selected: {styleFile.name}</span>
+							  {/if}
+							</label>
+						  </div>
 						{/if}
 
 						<button
