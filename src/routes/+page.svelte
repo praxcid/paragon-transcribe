@@ -136,12 +136,21 @@
 		if (fileInputEl) fileInputEl.value = '';
 	}
 
+	// Add state for current processing file and status
+	let currentProcessingFile = '';
+	let currentProcessingStatus = '';
+
+	// Ensure currentProcessingFile and currentProcessingStatus are set before each file
 	async function handleSubmit() {
 		if (!selectedFiles.length) return;
 		fileTranscripts = [];
 		isUploading = true;
+		currentProcessingFile = '';
+		currentProcessingStatus = '';
 		for (let i = 0; i < selectedFiles.length; i++) {
 			const file = selectedFiles[i];
+			currentProcessingFile = file.name;
+			currentProcessingStatus = 'Uploading and transcribing...';
 			const fileUrl = fileUrls[i];
 			const fileType = fileTypes[i];
 			// Only allow files that are less than 2 hours in length
@@ -158,11 +167,8 @@
 			const formData = new FormData();
 			formData.append('file', file);
 			formData.append('language', language);
-			// In handleSubmit, add isMedical to the FormData
 			formData.append('isMedical', isMedical ? 'true' : 'false');
-			// In handleSubmit, add geminiModel to the FormData
 			formData.append('geminiModel', geminiModel);
-			// In handleSubmit, append glossaryFile and styleFile if present
 			if (isMedical && glossaryFile) {
 				formData.append('glossaryFile', glossaryFile);
 			}
@@ -219,8 +225,13 @@
 			} finally {
 				reader.cancel();
 			}
+			currentProcessingStatus = 'Completed';
+			// Add a small delay between files to avoid backend overload
+			await new Promise(res => setTimeout(res, 500));
 		}
 		abortController = null;
+		currentProcessingFile = '';
+		currentProcessingStatus = '';
 		uploadComplete = true;
 		isUploading = false;
 	}
