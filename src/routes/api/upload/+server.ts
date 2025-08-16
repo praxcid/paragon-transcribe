@@ -51,6 +51,19 @@ export async function POST({ request }) {
 		generationConfig: { responseMimeType: 'application/json' }
 	});
 
+	const glossaryFile = formData.get('glossaryFile') as File | null;
+	const styleFile = formData.get('styleFile') as File | null;
+
+	let glossaryText = '';
+	let styleText = '';
+
+	if (isMedical && glossaryFile) {
+		glossaryText = await glossaryFile.text();
+	}
+	if (isMedical && styleFile) {
+		styleText = await styleFile.text();
+	}
+
 	try {
 		// Check that the file has been processed
 		let uploadedFile = await fileManager.getFile(uploadResult.file.name);
@@ -105,7 +118,7 @@ export async function POST({ request }) {
 				}
 			},
 			{
-				text: `Generate a transcript in ${language} for this file. Always use the format mm:ss for the time. Group similar text together rather than timestamping every line. Identify and label different speakers as Speaker 1, Speaker 2, etc.${isMedical ? ' Act as a professional medical transcriptionist and transcribe this file as a medical record, using appropriate medical terminology and formatting. Remove all filler words (such as um, uh, like, you know, etc.) as much as possible. Use punctuations as dictated and add correct punctuation where necessary for clarity and accuracy.' : ''} Respond with the transcript in the form of this JSON schema:\n     [{"timestamp": "00:00", "speaker": "Speaker 1", "text": "Today I will be talking about the importance of AI in the modern world."},{"timestamp": "01:00", "speaker": "Speaker 2", "text": "Has AI has revolutionized the way we live and work?"}]`
+				text: `Generate a transcript in ${language} for this file. Always use the format mm:ss for the time. Group similar text together rather than timestamping every line. Identify and label different speakers as Speaker 1, Speaker 2, etc.${isMedical ? ` Act as a professional medical transcriptionist and transcribe this file as a medical record, using appropriate medical terminology and formatting. Remove all filler words (such as um, uh, like, you know, etc.) as much as possible. Use punctuations as dictated and add correct punctuation where necessary for clarity and accuracy.${glossaryText ? ` Here is a glossary of terms to use and learn from while transcribing:\n${glossaryText}` : ''}${styleText ? ` Please adapt the style and formatting of the transcript to match this reference document:\n${styleText}` : ''}` : ''} Respond with the transcript in the form of this JSON schema:\n     [{"timestamp": "00:00", "speaker": "Speaker 1", "text": "Today I will be talking about the importance of AI in the modern world."},{"timestamp": "01:00", "speaker": "Speaker 2", "text": "Has AI has revolutionized the way we live and work?"}]`
 			}
 		]);
 

@@ -134,6 +134,13 @@
 			formData.append('isMedical', isMedical ? 'true' : 'false');
 			// In handleSubmit, add geminiModel to the FormData
 			formData.append('geminiModel', geminiModel);
+			// In handleSubmit, append glossaryFile and styleFile if present
+			if (isMedical && glossaryFile) {
+				formData.append('glossaryFile', glossaryFile);
+			}
+			if (isMedical && styleFile) {
+				formData.append('styleFile', styleFile);
+			}
 			const response = await fetch('/api/upload', {
 				method: 'POST',
 				body: formData,
@@ -289,7 +296,19 @@
 		fileTypes = selectedFiles.map(file => file.type.includes('audio') ? 'audio' : 'video');
 	}
 
+	// Add state for glossary and style files
+	let glossaryFile: File | null = null;
+	let styleFile: File | null = null;
 
+	function handleGlossaryFileInput(event: Event) {
+		const target = event.target as HTMLInputElement;
+		glossaryFile = target.files && target.files[0] ? target.files[0] : null;
+	}
+
+	function handleStyleFileInput(event: Event) {
+		const target = event.target as HTMLInputElement;
+		styleFile = target.files && target.files[0] ? target.files[0] : null;
+	}
 </script>
 
 <svelte:head>
@@ -507,6 +526,24 @@
 								</label>
 							</div>
 						</div>
+
+						<!-- Add file inputs for glossary and style reference if Medical is checked -->
+						{#if isMedical}
+							<div class="flex flex-col gap-2 mt-2">
+								<label class="block text-sm font-medium text-gray-700">Upload Glossary (.doc or .txt):
+									<input type="file" accept=".doc,.txt" on:change={handleGlossaryFileInput} class="block mt-1" />
+									{#if glossaryFile}
+										<span class="text-xs text-slate-600">Selected: {glossaryFile.name}</span>
+									{/if}
+								</label>
+								<label class="block text-sm font-medium text-gray-700">Upload Style Reference (.doc):
+									<input type="file" accept=".doc" on:change={handleStyleFileInput} class="block mt-1" />
+									{#if styleFile}
+										<span class="text-xs text-slate-600">Selected: {styleFile.name}</span>
+									{/if}
+								</label>
+							</div>
+						{/if}
 
 						<button
 							on:click={handleSubmit}
