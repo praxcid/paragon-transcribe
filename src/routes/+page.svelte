@@ -13,10 +13,11 @@
 	let fileTranscripts: Array<{ fileName: string; entries: Array<{ timestamp: string; speaker: string; text: string }> }> = [];
 	let language = 'en';
 	const languageOptions = [
+		{ value: 'auto', label: 'Auto Detect' },
 		{ value: 'en', label: 'English' },
 		{ value: 'en-au', label: 'Australian English' },
-		{ value: 'ne-romanized', label: 'Nepali Romanized English' },
-		{ value: 'ne', label: 'Nepali' }
+		{ value: 'ne-romanized', label: 'Nepali (Romanized/English Letters)' },
+		{ value: 'ne', label: 'Nepali (Devanagari Script)' }
 	];
 	let initialized = false;
 	let showTimestamps = false;
