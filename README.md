@@ -2,8 +2,6 @@
 
 A web application for transcribing audio and video files using Google's Gemini Flash model.
 
-**Live Application:** [https://paragon-transcribe.fly.dev/](https://paragon-transcribe.fly.dev/)
-
 ## Features
 
 - Specify the desired language of the transcript
