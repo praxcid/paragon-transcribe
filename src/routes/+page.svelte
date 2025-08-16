@@ -221,13 +221,18 @@
 		a.click();
 	}
 
+	// Utility function to remove accent marks from a string
+	function removeAccents(str: string): string {
+		return str.normalize('NFD').replace(/\p{Diacritic}/gu, '');
+	}
+
 	// Add a function to download a single transcript for a file
 	function downloadSingleTranscript(fileT) {
 		const lines = fileT.entries.map(entry => {
 			let line = '';
 			if (showTimestamps) line += `[${entry.timestamp}] `;
 			if (showSpeakers) line += `${entry.speaker}: `;
-			line += entry.text;
+			line += removeAccents(entry.text);
 			return line;
 		});
 		const blob = new Blob([lines.join('\n')], { type: 'application/msword' });
@@ -246,7 +251,7 @@
 				let line = '';
 				if (showTimestamps) line += `[${entry.timestamp}] `;
 				if (showSpeakers) line += `${entry.speaker}: `;
-				line += entry.text;
+				line += removeAccents(entry.text);
 				return line;
 			});
 			const docName = fileT.fileName.replace(/\.[^/.]+$/, '') + `-transcript-${geminiModel}.doc`;
@@ -614,7 +619,7 @@
 														{entry.speaker}
 													</span>
 												{/if}
-												<p class="font-medium leading-relaxed text-slate-800">{entry.text}</p>
+												<p class="font-medium leading-relaxed text-slate-800">{removeAccents(entry.text)}</p>
 											</div>
 										</div>
 									</div>
