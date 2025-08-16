@@ -108,6 +108,34 @@
 			.filter((entry): entry is { timestamp: string; speaker: string; text: string } => !!entry);
 	}
 
+	let abortController: AbortController | null = null;
+
+	function stopProcessing() {
+		if (abortController) {
+			abortController.abort();
+			abortController = null;
+		}
+		selectedFiles = [];
+		fileUrls = [];
+		fileTypes = [];
+		uploadComplete = false;
+		isUploading = false;
+		streamBuffer = '';
+		fileTranscripts = [];
+		audioElements.forEach(audioElement => {
+			audioElement.currentTime = 0;
+			audioElement.pause();
+		});
+		videoElements.forEach(videoElement => {
+			videoElement.currentTime = 0;
+			videoElement.pause();
+		});
+		glossaryFile = null;
+		styleFile = null;
+		// Reset file input element
+		if (fileInputEl) fileInputEl.value = '';
+	}
+
 	async function handleSubmit() {
 		if (!selectedFiles.length) return;
 		fileTranscripts = [];
@@ -141,12 +169,14 @@
 			if (isMedical && styleFile) {
 				formData.append('styleFile', styleFile);
 			}
+			abortController = new AbortController();
 			const response = await fetch('/api/upload', {
 				method: 'POST',
 				body: formData,
 				headers: {
 					Connection: 'keep-alive'
-				}
+				},
+				signal: abortController.signal
 			});
 			const reader = response.body?.getReader();
 			if (!reader) {
@@ -190,6 +220,7 @@
 				reader.cancel();
 			}
 		}
+		abortController = null;
 		uploadComplete = true;
 		isUploading = false;
 	}
@@ -309,6 +340,9 @@
 		const target = event.target as HTMLInputElement;
 		styleFile = target.files && target.files[0] ? target.files[0] : null;
 	}
+
+	// Add a ref for the file input
+	let fileInputEl: HTMLInputElement | null = null;
 </script>
 
 <svelte:head>
@@ -458,6 +492,7 @@
 									on:input={handleFileInput}
 									id="audio-file"
 									accept="audio/*,video/*"
+									bind:this={fileInputEl}
 									class="block h-16 w-full rounded-lg border-2 border-indigo-200 bg-white/90 text-sm text-slate-700 shadow-sm backdrop-blur-sm file:mr-4 file:rounded-lg file:border-0 file:bg-gradient-to-r file:from-indigo-600 file:to-purple-600 file:px-6 file:py-3 file:text-sm file:font-semibold file:text-white file:transition-all file:duration-300 hover:file:shadow-lg hover:file:shadow-indigo-500/25 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
 								/>
 							</div>
@@ -583,16 +618,6 @@
 							</div>
 						</button>
 
-						<div class="text-center">
-							<div
-								class="rounded-lg border-2 border-cyan-200 bg-gradient-to-r from-cyan-50 to-blue-50 p-4 text-sm text-cyan-800 shadow-sm"
-							>
-								<p>📁 Supported formats: MP3, WAV, MP4, AVI & more</p>
-								<p>⏱️ Maximum duration: 1 hour per file</p>
-								<p>This app uses an experimental model. If processing fails, please try again</p>
-							</div>
-						</div>
-
 						{#if isUploading}
 							<div class="text-center">
 								<div class="inline-flex items-center space-x-2 text-indigo-600">
@@ -614,6 +639,17 @@
 									</span>
 								</div>
 							</div>
+						{/if}
+
+						{#if isUploading}
+						  <div class="my-4 flex justify-center">
+							<button
+							  on:click={stopProcessing}
+							  class="px-4 py-2 rounded bg-red-600 text-white font-semibold hover:bg-red-700"
+							>
+							  Stop Processing
+							</button>
+						  </div>
 						{/if}
 					</div>
 				</div>
