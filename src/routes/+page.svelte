@@ -20,10 +20,10 @@
 		{ value: 'ne', label: 'Nepali (Devanagari Script)' }
 	];
 	let initialized = false;
-	let showTimestamps = false;
+	let showTimestamps = true;
 	let showSpeakers = false;
 	// Add a variable for the Medical checkbox
-	let isMedical = false;
+	let isMedical = true;
 
 	let audioElements: HTMLAudioElement[] = [];
 	let videoElements: HTMLVideoElement[] = [];
@@ -169,6 +169,7 @@
 			formData.append('language', language);
 			formData.append('isMedical', isMedical ? 'true' : 'false');
 			formData.append('geminiModel', geminiModel);
+			formData.append('userInstructions', userInstructions); // Include user instructions
 			if (isMedical && glossaryFile) {
 				formData.append('glossaryFile', glossaryFile);
 			}
@@ -276,10 +277,10 @@
 	}
 
 	// Add a function to download a single transcript for a file
-	function downloadSingleTranscript(fileT) {
+	function downloadSingleTranscript(fileT: { fileName: string; entries: Array<{ timestamp: string; speaker: string; text: string }> }) {
 		const lines = fileT.entries.map(entry => {
 			let line = '';
-			if (showTimestamps) line += `[${entry.timestamp}] `;
+			if (showTimestamps && !downloadWithoutTimestamps) line += `[${entry.timestamp}] `;
 			if (showSpeakers) line += `${entry.speaker}: `;
 			line += removeAccents(entry.text);
 			return line;
@@ -298,7 +299,7 @@
 		fileTranscripts.forEach(fileT => {
 			const lines = fileT.entries.map(entry => {
 				let line = '';
-				if (showTimestamps) line += `[${entry.timestamp}] `;
+				if (showTimestamps && !downloadWithoutTimestamps) line += `[${entry.timestamp}] `;
 				if (showSpeakers) line += `${entry.speaker}: `;
 				line += removeAccents(entry.text);
 				return line;
@@ -354,6 +355,12 @@
 
 	// Add a ref for the file input
 	let fileInputEl: HTMLInputElement | null = null;
+
+	// Add state for user instructions
+	let userInstructions = '';
+
+	// Add state for download without timestamps
+	let downloadWithoutTimestamps = true;
 </script>
 
 <svelte:head>
@@ -497,7 +504,7 @@
 								Choose File
 							</Label>
 							<div class="relative">
-								<Input
+								<input
 									type="file"
 									multiple
 									on:input={handleFileInput}
@@ -594,6 +601,31 @@
 							</label>
 						  </div>
 						{/if}
+
+						<!-- New textarea for user instructions -->
+						<div class="mb-4">
+							<label for="instructions" class="block text-sm font-medium text-gray-700 mb-1">Additional Instructions for Transcription (optional)</label>
+							<textarea
+								id="instructions"
+								class="block w-full rounded-md border border-gray-300 bg-white py-2 px-3 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-indigo-500 sm:text-sm"
+								rows="3"
+								bind:value={userInstructions}
+								placeholder="e.g. Use British spelling, ignore background noise, etc."
+							></textarea>
+						</div>
+
+						<!-- Add a checkbox to download transcripts without timestamps -->
+						<div class="mb-2 flex items-center gap-2">
+							<input
+								type="checkbox"
+								id="download-without-timestamps"
+								bind:checked={downloadWithoutTimestamps}
+								class="accent-indigo-600 h-4 w-4"
+							/>
+							<label for="download-without-timestamps" class="text-slate-700 text-sm select-none cursor-pointer">
+								Download transcripts without timestamps
+							</label>
+						</div>
 
 						<button
 							on:click={handleSubmit}

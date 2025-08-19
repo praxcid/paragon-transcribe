@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleAIFileManager, FileState } from '@google/generative-ai/server';
 import { file as tempFile } from 'tmp-promise';
-import { createWriteStream } from 'fs';
+import { createWriteStream } from 'node:fs';
 import { pipeline } from 'stream/promises';
 import { env } from '$env/dynamic/private';
 import { safetySettings } from '$lib/index';
@@ -110,17 +110,23 @@ export async function POST({ request }) {
 			);
 		}
 
-		const result = await model.generateContentStream([
-			{
-				fileData: {
-					mimeType: file.type,
-					fileUri: uploadResult.file.uri
+		let result;
+		try {
+			result = await model.generateContentStream([
+				{
+					fileData: {
+						mimeType: file.type,
+						fileUri: uploadResult.file.uri
+					}
+				},
+				{
+					text: `Generate a transcript in ${language} for this file. Always use the format mm:ss for the time. Group similar text together rather than timestamping every line. Identify and label different speakers as Speaker 1, Speaker 2, etc.${language === 'en-au' ? ' Use strictly British or Australian English spelling, grammar, and conventions throughout the transcript.' : ''}${isMedical ? ` Act as a professional medical transcriptionist and transcribe this file as a medical record, using appropriate medical terminology and formatting. Remove all filler words (such as um, uh, like, you know, etc.) as much as possible. Use punctuations as dictated and add correct punctuation where necessary for clarity and accuracy. Do not use contraction words; expand all contractions (e.g., use "do not" instead of "don't").${glossaryText ? ` Here is a glossary of terms to use and learn from while transcribing:\n${glossaryText}` : ''}${styleText ? ` Please adapt the style and formatting of the transcript to match this reference document:\n${styleText}` : ''}` : ''} Respond with the transcript in the form of this JSON schema:\n     [{"timestamp": "00:00", "speaker": "Speaker 1", "text": "Today I will be talking about the importance of AI in the modern world."},{"timestamp": "01:00", "speaker": "Speaker 2", "text": "Has AI has revolutionized the way we live and work?"}]`
 				}
-			},
-			{
-				text: `Generate a transcript in ${language} for this file. Always use the format mm:ss for the time. Group similar text together rather than timestamping every line. Identify and label different speakers as Speaker 1, Speaker 2, etc.${isMedical ? ` Act as a professional medical transcriptionist and transcribe this file as a medical record, using appropriate medical terminology and formatting. Remove all filler words (such as um, uh, like, you know, etc.) as much as possible. Use punctuations as dictated and add correct punctuation where necessary for clarity and accuracy.${glossaryText ? ` Here is a glossary of terms to use and learn from while transcribing:\n${glossaryText}` : ''}${styleText ? ` Please adapt the style and formatting of the transcript to match this reference document:\n${styleText}` : ''}` : ''} Respond with the transcript in the form of this JSON schema:\n     [{"timestamp": "00:00", "speaker": "Speaker 1", "text": "Today I will be talking about the importance of AI in the modern world."},{"timestamp": "01:00", "speaker": "Speaker 2", "text": "Has AI has revolutionized the way we live and work?"}]`
-			}
-		]);
+			]);
+		} catch (err) {
+			console.error('Error from Google Generative AI API:', err);
+			return new Response('Error from Google Generative AI API: ' + (err?.message || err), { status: 500 });
+		}
 
 		return new Response(streamChunks(result.stream), {
 			headers: {
