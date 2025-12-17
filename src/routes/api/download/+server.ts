@@ -4,13 +4,13 @@ export async function POST({ request }) {
 
 	if (timestamps) {
 		formattedTranscript = transcript
-			.map((entry) => {
+			.map((entry: any) => {
 				return `[${entry.timestamp}]\n[${entry.speaker}]\n${entry.text}`;
 			})
 			.join('\n\n');
 	} else {
 		formattedTranscript = transcript
-			.map((entry) => {
+			.map((entry: any) => {
 				return `[${entry.speaker}]\n${entry.text}`;
 			})
 			.join('\n\n');

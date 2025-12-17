@@ -1,34 +1,61 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { GoogleAIFileManager, FileState } from '@google/generative-ai/server';
+import { GoogleGenAI } from '@google/genai';
+// FileState enum is provided by the new SDK under the name FileState
+import { FileState } from '@google/genai';
 import { file as tempFile } from 'tmp-promise';
-import { createWriteStream } from 'node:fs';
-import { pipeline } from 'stream/promises';
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream';
+import { promisify } from 'util';
+const pipelinePromise = promisify(pipeline);
 import { env } from '$env/dynamic/private';
 import { safetySettings } from '$lib/index';
 
-async function* streamChunks(stream: ReadableStream<Uint8Array>) {
+async function* streamChunks(stream: AsyncIterable<any>) {
 	for await (const chunk of stream) {
-		yield chunk.text();
+		if (typeof chunk === 'string') {
+			yield chunk;
+		} else if (chunk && typeof chunk.text === 'function') {
+			yield await chunk.text();
+		} else {
+			yield typeof chunk === 'object' ? JSON.stringify(chunk) : String(chunk);
+		}
 	}
+}
+
+function asyncIterableToReadableStream(iterable: AsyncIterable<any>) {
+	return new ReadableStream({
+		async start(controller) {
+			try {
+				for await (const chunk of iterable) {
+					const text = typeof chunk === 'string' ? chunk : (chunk?.toString?.() || JSON.stringify(chunk));
+					controller.enqueue(new TextEncoder().encode(text));
+				}
+				controller.close();
+			} catch (err) {
+				controller.error(err);
+			}
+		}
+	});
 }
 
 export async function POST({ request }) {
 	const formData = await request.formData();
 	const file = formData.get('file') as File;
 	const language = (formData.get('language') as string) || 'English';
+	const geminiModel = (formData.get('geminiModel') as string) || 'gemini-2.5-flash';
 	const isMedical = formData.get('isMedical') === 'true';
 
 	let tempFileHandle;
 	let uploadResult;
 
-	const fileManager = new GoogleAIFileManager(env.GOOGLE_API_KEY);
+	const ai = new GoogleGenAI({ apiKey: env.GOOGLE_API_KEY });
 
-	// Upload file
+	// Upload file (use runtime cast to access internal apiClient/uploader)
 	try {
 		tempFileHandle = await tempFile({ postfix: `.${file.name.split('.').pop()}` });
 
-		await pipeline(file.stream(), createWriteStream(tempFileHandle.path));
-		uploadResult = await fileManager.uploadFile(tempFileHandle.path, {
+	await pipelinePromise(file.stream(), createWriteStream(tempFileHandle.path));
+		// apiClient is protected on the public type; access at runtime via any
+		uploadResult = await (ai as any).apiClient.uploadFile(tempFileHandle.path, {
 			mimeType: file.type
 		});
 	} catch (error) {
@@ -42,14 +69,13 @@ export async function POST({ request }) {
 
 	console.log(uploadResult);
 
-	// Generate transcript
-	const genAI = new GoogleGenerativeAI(env.GOOGLE_API_KEY);
+	// Generate transcript using the new SDK
+	// Build contents: a file reference part and the text instruction
+	const uploadName = uploadResult?.name || uploadResult?.file?.name || uploadResult?.fileName;
 
-	const model = genAI.getGenerativeModel({
-		model: 'gemini-2.5-flash',
-		safetySettings,
-		generationConfig: { responseMimeType: 'application/json' }
-	});
+	const fileUri = uploadResult?.uri || uploadResult?.file?.uri || uploadResult?.fileUri;
+
+
 
 	const glossaryFile = formData.get('glossaryFile') as File | null;
 	const styleFile = formData.get('styleFile') as File | null;
@@ -64,20 +90,41 @@ export async function POST({ request }) {
 		styleText = await styleFile.text();
 	}
 
+	// Build contents after loading glossary/style text
+	const contents = [
+		{ fileData: { mimeType: file.type, fileUri } },
+		{ text: `Generate a transcript in ${language} for this file. Always use the format mm:ss for the time. Group similar text together rather than timestamping every line. Identify and label different speakers as Speaker 1, Speaker 2, etc.${language === 'en-au' ? ' Use strictly British or Australian English spelling, grammar, and conventions throughout the transcript.' : ''}${isMedical ? ` Act as a professional medical transcriptionist and transcribe this file as a medical record, using appropriate medical terminology and formatting. Remove all filler words (such as um, uh, like, you know, etc.) as much as possible. Use punctuations as dictated and add correct punctuation where necessary for clarity and accuracy. Do not use contraction words; expand all contractions (e.g., use "do not" instead of "don't").${glossaryText ? ` Here is a glossary of terms to use and learn from while transcribing:\n${glossaryText}` : ''}${styleText ? ` Please adapt the style and formatting of the transcript to match this reference document:\n${styleText}` : ''}` : ''} Respond with the transcript in the form of this JSON schema:\n     [{"timestamp": "00:00", "speaker": "Speaker 1", "text": "Today I will be talking about the importance of AI in the modern world."},{"timestamp": "01:00", "speaker": "Speaker 2", "text": "Has AI has revolutionized the way we live and work?"}]` }
+	];
+
 	try {
 		// Check that the file has been processed
-		let uploadedFile = await fileManager.getFile(uploadResult.file.name);
+		// The new SDK exposes `files` as a resource on the client. Use runtime casts
+		// to call the public `get` method if available.
+		let uploadedFile: any = undefined;
+		const fileName = uploadName;
+		try {
+			uploadedFile = await (ai as any).files.get?.({ name: fileName });
+		} catch (e) {
+			// fallback to a direct request via the internal client
+			try {
+				const resp = await (ai as any).apiClient.request({ path: `files/${fileName}`, httpMethod: 'GET' });
+				// resp may be an HttpResponse wrapper; try to extract JSON
+				uploadedFile = (resp && resp.withResponse) ? await resp.withResponse().then((r: any) => r.data || r.response.json()) : await resp.json?.() || resp;
+			} catch (err) {
+				throw err;
+			}
+		}
 
 		let retries = 0;
 		const maxRetries = 3;
 		const initialRetryDelay = 1000; // 1 second
 
-		while (uploadedFile.state === FileState.PROCESSING) {
+	while (uploadedFile.state === FileState.PROCESSING) {
 			console.log('File is processing... waiting 5 seconds before next poll.');
 			await new Promise((resolve) => setTimeout(resolve, 5000));
 
 			try {
-				uploadedFile = await fileManager.getFile(uploadResult.file.name);
+				uploadedFile = await (ai as any).files.get?.({ name: fileName });
 				retries = 0; // Reset retries on a successful API call
 			} catch (error) {
 				// Check if it's a 5xx error eligible for retry
@@ -110,31 +157,22 @@ export async function POST({ request }) {
 			);
 		}
 
-		let result;
+		let resultIter: AsyncIterable<any> | undefined;
 		try {
-			result = await model.generateContentStream([
-				{
-					fileData: {
-						mimeType: file.type,
-						fileUri: uploadResult.file.uri
-					}
-				},
-				{
-					text: `Generate a transcript in ${language} for this file. Always use the format mm:ss for the time. Group similar text together rather than timestamping every line. Identify and label different speakers as Speaker 1, Speaker 2, etc.${language === 'en-au' ? ' Use strictly British or Australian English spelling, grammar, and conventions throughout the transcript.' : ''}${isMedical ? ` Act as a professional medical transcriptionist and transcribe this file as a medical record, using appropriate medical terminology and formatting. Remove all filler words (such as um, uh, like, you know, etc.) as much as possible. Use punctuations as dictated and add correct punctuation where necessary for clarity and accuracy. Do not use contraction words; expand all contractions (e.g., use "do not" instead of "don't").${glossaryText ? ` Here is a glossary of terms to use and learn from while transcribing:\n${glossaryText}` : ''}${styleText ? ` Please adapt the style and formatting of the transcript to match this reference document:\n${styleText}` : ''}` : ''} Respond with the transcript in the form of this JSON schema:\n     [{"timestamp": "00:00", "speaker": "Speaker 1", "text": "Today I will be talking about the importance of AI in the modern world."},{"timestamp": "01:00", "speaker": "Speaker 2", "text": "Has AI has revolutionized the way we live and work?"}]`
+			// Use the models streaming API on the new client
+			resultIter = await (ai as any).models.generateContentStream?.({ model: geminiModel, contents, safetySettings, generationConfig: { responseMimeType: 'application/json' } });
+			const bodyStream = asyncIterableToReadableStream(resultIter as AsyncIterable<any>);
+			return new Response(bodyStream, {
+				headers: {
+					'Content-Type': 'text/plain',
+					'Transfer-Encoding': 'chunked',
+					'X-Content-Type-Options': 'nosniff'
 				}
-			]);
+			});
 		} catch (err) {
 			console.error('Error from Google Generative AI API:', err);
-			return new Response('Error from Google Generative AI API: ' + (err?.message || err), { status: 500 });
+			return new Response('Error from Google Generative AI API: ' + (err instanceof Error ? err.message : String(err)), { status: 500 });
 		}
-
-		return new Response(streamChunks(result.stream), {
-			headers: {
-				'Content-Type': 'text/plain',
-				'Transfer-Encoding': 'chunked',
-				'X-Content-Type-Options': 'nosniff'
-			}
-		});
 	} catch (error) {
 		console.error('Error during transcription process:', error);
 		return new Response(
