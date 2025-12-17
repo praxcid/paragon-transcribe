@@ -160,18 +160,66 @@ export async function POST({ request }) {
 		let resultIter: AsyncIterable<any> | undefined;
 		try {
 			// Use the models streaming API on the new client
-			resultIter = await (ai as any).models.generateContentStream?.({ model: geminiModel, contents, safetySettings, generationConfig: { responseMimeType: 'application/json' } });
-			const bodyStream = asyncIterableToReadableStream(resultIter as AsyncIterable<any>);
-			return new Response(bodyStream, {
-				headers: {
-					'Content-Type': 'text/plain',
-					'Transfer-Encoding': 'chunked',
-					'X-Content-Type-Options': 'nosniff'
+			const maxModelRetries = 3;
+			let modelAttempt = 0;
+			let lastModelError: any = null;
+
+			for (; modelAttempt <= maxModelRetries; modelAttempt++) {
+				try {
+					resultIter = await (ai as any).models.generateContentStream?.({ model: geminiModel, contents, safetySettings, generationConfig: { responseMimeType: 'application/json' } });
+					// success
+					const bodyStream = asyncIterableToReadableStream(resultIter as AsyncIterable<any>);
+					return new Response(bodyStream, {
+						headers: {
+							'Content-Type': 'text/plain',
+							'Transfer-Encoding': 'chunked',
+							'X-Content-Type-Options': 'nosniff'
+						}
+					});
+				} catch (err) {
+					lastModelError = err;
+					// try to detect transient 503 / overloaded errors
+					let statusCode: number | undefined = undefined;
+					if (err && typeof err === 'object') {
+						statusCode = (err as any).status || (err as any).code;
+					}
+					const message = err && (err as any).message ? String((err as any).message) : String(err);
+
+					const isTransient = statusCode === 503 || /overload|unavailable|503|model is overloaded/i.test(message);
+					if (!isTransient || modelAttempt === maxModelRetries) {
+						// Non-retryable or out of attempts; return structured JSON error
+						console.error('Error from Google Generative AI API (final):', err);
+						// Try to parse embedded JSON from message if present
+						let parsed: any = undefined;
+						try {
+							const msg = typeof message === 'string' ? message : JSON.stringify(message);
+							const idx = msg.indexOf('{');
+							if (idx !== -1) {
+								const jsonPart = msg.slice(idx);
+								parsed = JSON.parse(jsonPart);
+							}
+						} catch (e) {
+							parsed = undefined;
+						}
+
+						const errorBody = parsed?.error || { code: statusCode || 500, message: message };
+						return new Response(JSON.stringify({ error: errorBody }), { status: statusCode || 500, headers: { 'Content-Type': 'application/json' } });
+					}
+
+					// transient -> wait and retry
+					const delay = 1000 * Math.pow(2, modelAttempt); // 1s, 2s, 4s...
+					console.warn(`Transient model error, retrying in ${delay}ms (attempt ${modelAttempt + 1}/${maxModelRetries})`, message);
+					await new Promise((r) => setTimeout(r, delay));
+					continue;
 				}
-			});
+			}
+
+			// If we exit loop without returning, return last error
+			console.error('Model generation failed after retries:', lastModelError);
+			return new Response(JSON.stringify({ error: { message: String(lastModelError) } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 		} catch (err) {
-			console.error('Error from Google Generative AI API:', err);
-			return new Response('Error from Google Generative AI API: ' + (err instanceof Error ? err.message : String(err)), { status: 500 });
+			console.error('Error from Google Generative AI API (outer):', err);
+			return new Response(JSON.stringify({ error: { message: String(err) } }), { status: 500, headers: { 'Content-Type': 'application/json' } });
 		}
 	} catch (error) {
 		console.error('Error during transcription process:', error);
