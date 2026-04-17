@@ -20,7 +20,7 @@ A web application for transcribing audio and video files using Google's Gemini F
 2.  Clone & install
 
     ```bash
-    git clone https://github.com/mikeesto/paragon-transcribe.git
+    git clone https://github.com/praxcid/paragon-transcribe.git
     cd paragon-transcribe
     ```
 
