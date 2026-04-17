@@ -185,8 +185,10 @@ export async function POST({ request }) {
 					}
 					const message = err && (err as any).message ? String((err as any).message) : String(err);
 
-					const isTransient = statusCode === 503 || /overload|unavailable|503|model is overloaded/i.test(message);
-					if (!isTransient || modelAttempt === maxModelRetries) {
+					// 429 = quota exceeded (not retryable, but needs user-friendly message)
+					const isQuotaExceeded = statusCode === 429 || /quota|exceeded|rate.limit/i.test(message);
+					const isTransient = (statusCode === 503 || /overload|unavailable|503|model is overloaded/i.test(message)) && statusCode !== 429;
+					if (isQuotaExceeded || !isTransient || modelAttempt === maxModelRetries) {
 						// Non-retryable or out of attempts; return structured JSON error
 						console.error('Error from Google Generative AI API (final):', err);
 						// Try to parse embedded JSON from message if present
@@ -202,7 +204,15 @@ export async function POST({ request }) {
 							parsed = undefined;
 						}
 
-						const errorBody = parsed?.error || { code: statusCode || 500, message: message };
+						let errorBody;
+						if (isQuotaExceeded) {
+							errorBody = {
+								code: 429,
+								message: 'API quota exceeded. Please upgrade your Google Generative AI API plan or try again later. Visit https://ai.google.dev to manage your quotas.'
+							};
+						} else {
+							errorBody = parsed?.error || { code: statusCode || 500, message: message };
+						}
 						return new Response(JSON.stringify({ error: errorBody }), { status: statusCode || 500, headers: { 'Content-Type': 'application/json' } });
 					}
 
